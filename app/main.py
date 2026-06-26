@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from app.bot.commands import setup_bot_commands
 from app.bot.handlers import router
 from app.config import settings
 from app.db.session import init_db
@@ -27,6 +28,9 @@ async def main() -> None:
     )
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
+
+    await setup_bot_commands(bot)
+    logger.info("Bot commands menu configured")
 
     scheduler = setup_scheduler(bot)
     scheduler.start()
