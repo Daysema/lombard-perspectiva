@@ -133,11 +133,15 @@ class CatalogScanner:
                     select(Product).where(Product.external_id == external_id)
                 )
                 if restored:
+                    was_sold = restored.removal_reason == RemovalReason.SOLD.value
                     product = restored
                     product.status = ProductStatus.ACTIVE
                     product.removed_at = None
                     product.removal_reason = None
                     product.last_seen_at = now
+                    if was_sold:
+                        # Новый завоз: тот же URL, но другая единица товара — новый цикл на витрине
+                        product.first_seen_at = now
                     self._apply_fields(product, item)
                     session.add(
                         ProductEvent(product_id=product.id, event_type=EventType.APPEARED)
