@@ -1,11 +1,15 @@
+import asyncio
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, EventType, Product, ProductEvent, ProductStatus, ScanRun
-from app.scraper.categories import CATEGORIES, CatalogCategory
+from app.scraper.categories import CATEGORIES
 from app.scraper.parser import CatalogParser, ScrapedProduct
+
+_scan_lock = asyncio.Lock()
 
 
 class CatalogScanner:
@@ -13,7 +17,15 @@ class CatalogScanner:
         self.parser = parser or CatalogParser()
 
     async def run(self, session: AsyncSession) -> ScanRun:
-        scan = ScanRun(started_at=datetime.now(UTC))
+        if _scan_lock.locked():
+            raise RuntimeError("Сканирование уже выполняется, дождитесь завершения")
+
+        async with _scan_lock:
+            return await self._run_locked(session)
+
+    async def _run_locked(self, session: AsyncSession) -> ScanRun:
+        started_at = datetime.now(UTC)
+        scan = ScanRun(started_at=started_at)
         session.add(scan)
         await session.flush()
 
@@ -45,28 +57,32 @@ class CatalogScanner:
             scan.removed_count = total_removed
             scan.price_changed_count = total_price_changed
             scan.finished_at = datetime.now(UTC)
+            await session.commit()
+            await session.refresh(scan)
+            return scan
         except Exception as exc:
-            scan.error = str(exc)
-            scan.finished_at = datetime.now(UTC)
+            await session.rollback()
+            error_scan = ScanRun(
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                error=str(exc),
+            )
+            session.add(error_scan)
             await session.commit()
             raise
 
-        await session.commit()
-        await session.refresh(scan)
-        return scan
-
     async def _ensure_categories(self, session: AsyncSession) -> None:
         for category in CATEGORIES:
-            existing = await session.scalar(select(Category).where(Category.slug == category.slug))
-            if existing:
-                continue
-            session.add(
-                Category(
+            stmt = (
+                insert(Category)
+                .values(
                     slug=category.slug,
                     name=category.name,
                     url_path=category.url_path,
                 )
+                .on_conflict_do_nothing(index_elements=["slug"])
             )
+            await session.execute(stmt)
         await session.flush()
 
     async def _sync_category(

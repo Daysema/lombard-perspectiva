@@ -72,6 +72,9 @@ async def cmd_scan(message: Message) -> None:
     try:
         async with async_session() as session:
             scan = await scanner.run(session)
+    except RuntimeError as exc:
+        await message.answer(f"⏳ {exc}")
+        return
     except Exception:
         logger.exception("Manual scan failed")
         await message.answer("❌ Ошибка при сканировании. Проверьте логи контейнера.")
