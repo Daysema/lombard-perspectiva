@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from app.scraper.categories import ARCHIVE_CATEGORIES, CATEGORIES
 from app.scraper.parser import CatalogParser, ScrapedProduct
 
 _scan_lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
 
 
 class CatalogScanner:
@@ -84,7 +86,10 @@ class CatalogScanner:
         archive_ids: set[str] = set()
         for category in ARCHIVE_CATEGORIES:
             scraped = await self.parser.fetch_category(category)
-            archive_ids.update(item.external_id for item in scraped)
+            ids = {item.external_id for item in scraped}
+            archive_ids.update(ids)
+            logger.info("Архив %s: %s позиций", category.name, len(ids))
+        logger.info("Всего в архивах: %s уникальных URL", len(archive_ids))
         return archive_ids
 
     async def _ensure_categories(self, session: AsyncSession) -> None:
@@ -133,8 +138,16 @@ class CatalogScanner:
                     select(Product).where(Product.external_id == external_id)
                 )
                 if restored:
-                    # Тот же URL на витрине — тот же лот (например, вернули после delisted).
-                    # Новый завоз той же модели на сайте всегда с новым URL — отдельная запись в БД.
+                    if restored.removal_reason == RemovalReason.SOLD.value:
+                        # Проданный лот с этим URL остаётся в истории продаж.
+                        # Новый завоз той же модели — всегда новый URL и новая запись в БД.
+                        logger.warning(
+                            "Проданный товар снова на витрине (тот же URL): %s — не восстанавливаем",
+                            external_id,
+                        )
+                        continue
+
+                    # Тот же URL — тот же лот (вернули после снятия с витрины).
                     product = restored
                     product.status = ProductStatus.ACTIVE
                     product.removed_at = None
@@ -199,7 +212,11 @@ class CatalogScanner:
         )
 
         for product in result.scalars():
-            product.removal_reason = self._resolve_removal_reason(product.external_id, archive_ids)
+            if product.removal_reason == RemovalReason.SOLD.value:
+                # Продажа не отменяется: новый завоз = новый URL, старая запись остаётся sold.
+                continue
+            if product.external_id in archive_ids:
+                product.removal_reason = RemovalReason.SOLD.value
 
         await session.flush()
 
