@@ -14,7 +14,7 @@ from app.scraper.scanner import CatalogScanner
 logger = logging.getLogger(__name__)
 
 
-async def run_scan() -> None:
+async def run_scan(bot: Bot) -> None:
     logger.info("Scheduled scan started")
     scanner = CatalogScanner()
     try:
@@ -64,6 +64,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         run_scan,
         "interval",
         hours=settings.scan_interval_hours,
+        args=[bot],
         id="catalog_scan",
         replace_existing=True,
     )
