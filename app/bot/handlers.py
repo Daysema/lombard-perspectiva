@@ -1,4 +1,3 @@
-import logging
 import re
 
 from aiogram import F, Router
@@ -20,9 +19,7 @@ from app.reports.builder import (
     split_message,
 )
 from app.reports.service import Period, report_service
-from app.scraper.scanner import CatalogScanner
 
-logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -64,33 +61,6 @@ async def cmd_status(message: Message) -> None:
         scan = await report_service.get_last_scan(session)
         active_count = await report_service.active_count(session)
     await message.answer(build_status_text(scan, active_count))
-
-
-@router.message(Command("scan"))
-async def cmd_scan(message: Message) -> None:
-    await message.answer("⏳ Запускаю сканирование каталога и архивов…")
-    scanner = CatalogScanner()
-    try:
-        async with async_session() as session:
-            scan = await scanner.run(session)
-    except RuntimeError as exc:
-        await message.answer(f"⏳ {exc}")
-        return
-    except Exception:
-        logger.exception("Manual scan failed")
-        await message.answer("❌ Ошибка при сканировании. Проверьте логи контейнера.")
-        return
-
-    text = (
-        "✅ Сканирование завершено.\n"
-        f"На витрине: {scan.products_found}\n"
-        f"Новых: {scan.new_count}\n"
-        f"Ушло с витрины: {scan.removed_count}\n"
-        f"├ Продано (архив): {scan.sold_count}\n"
-        f"└ Снято с витрины: {scan.delisted_count}\n"
-        f"Изменений цены: {scan.price_changed_count}"
-    )
-    await message.answer(text)
 
 
 @router.message(Command("sold"))

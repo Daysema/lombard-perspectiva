@@ -4,7 +4,6 @@ from aiogram.types import BotCommand, BotCommandScopeDefault
 BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="start", description="Перезапустить бота"),
     BotCommand(command="status", description="Статус сканирования"),
-    BotCommand(command="scan", description="Сканировать каталог"),
     BotCommand(command="sold", description="Продано (архив)"),
     BotCommand(command="delisted", description="Снято с витрины"),
     BotCommand(command="new", description="Новые поступления"),
