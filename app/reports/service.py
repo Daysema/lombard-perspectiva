@@ -183,3 +183,6 @@ class ReportService:
             select(func.count(Product.id)).where(Product.status == ProductStatus.ACTIVE)
         )
         return result.scalar_one()
+
+
+report_service = ReportService()

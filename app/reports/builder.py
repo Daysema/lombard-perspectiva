@@ -2,9 +2,8 @@ import html
 from datetime import datetime
 
 from app.db.models import Product, ScanRun
-from app.reports.service import PRICE_BUCKETS, Period, ReportService
+from app.reports.service import PRICE_BUCKETS, Period
 
-report_service = ReportService()
 TELEGRAM_MESSAGE_LIMIT = 4000
 
 
