@@ -14,6 +14,11 @@ class ProductStatus(str, enum.Enum):
     REMOVED = "removed"
 
 
+class RemovalReason(str, enum.Enum):
+    SOLD = "sold"
+    DELISTED = "delisted"
+
+
 class EventType(str, enum.Enum):
     APPEARED = "appeared"
     REMOVED = "removed"
@@ -54,6 +59,7 @@ class Product(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removal_reason: Mapped[str | None] = mapped_column(String(16), index=True)
     status: Mapped[ProductStatus] = mapped_column(
         Enum(ProductStatus, name="product_status"),
         default=ProductStatus.ACTIVE,
@@ -86,6 +92,8 @@ class ScanRun(Base):
     products_found: Mapped[int] = mapped_column(Integer, default=0)
     new_count: Mapped[int] = mapped_column(Integer, default=0)
     removed_count: Mapped[int] = mapped_column(Integer, default=0)
+    sold_count: Mapped[int] = mapped_column(Integer, default=0)
+    delisted_count: Mapped[int] = mapped_column(Integer, default=0)
     price_changed_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
 

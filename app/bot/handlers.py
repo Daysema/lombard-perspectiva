@@ -8,6 +8,7 @@ from aiogram.types import Message
 from app.db.session import async_session
 from app.reports.builder import (
     build_brand_stats_report,
+    build_delisted_report,
     build_fast_brands_report,
     build_help_text,
     build_new_report,
@@ -67,7 +68,7 @@ async def cmd_status(message: Message) -> None:
 
 @router.message(Command("scan"))
 async def cmd_scan(message: Message) -> None:
-    await message.answer("⏳ Запускаю сканирование всех категорий…")
+    await message.answer("⏳ Запускаю сканирование каталога и архивов…")
     scanner = CatalogScanner()
     try:
         async with async_session() as session:
@@ -82,9 +83,11 @@ async def cmd_scan(message: Message) -> None:
 
     text = (
         "✅ Сканирование завершено.\n"
-        f"Найдено: {scan.products_found}\n"
+        f"На витрине: {scan.products_found}\n"
         f"Новых: {scan.new_count}\n"
-        f"Ушло с сайта: {scan.removed_count}\n"
+        f"Ушло с витрины: {scan.removed_count}\n"
+        f"├ Продано (архив): {scan.sold_count}\n"
+        f"└ Снято с витрины: {scan.delisted_count}\n"
         f"Изменений цены: {scan.price_changed_count}"
     )
     await message.answer(text)
@@ -96,6 +99,15 @@ async def cmd_sold(message: Message, command: CommandObject) -> None:
     async with async_session() as session:
         products = await report_service.sold_products(session, period)
     for part in split_message(build_sold_report(products, period)):
+        await message.answer(part)
+
+
+@router.message(Command("delisted"))
+async def cmd_delisted(message: Message, command: CommandObject) -> None:
+    period = Period(parse_days(command))
+    async with async_session() as session:
+        products = await report_service.delisted_products(session, period)
+    for part in split_message(build_delisted_report(products, period)):
         await message.answer(part)
 
 

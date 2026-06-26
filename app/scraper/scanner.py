@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Category, EventType, Product, ProductEvent, ProductStatus, ScanRun
-from app.scraper.categories import CATEGORIES
+from app.db.models import Category, EventType, Product, ProductEvent, ProductStatus, RemovalReason, ScanRun
+from app.scraper.categories import ARCHIVE_CATEGORIES, CATEGORIES
 from app.scraper.parser import CatalogParser, ScrapedProduct
 
 _scan_lock = asyncio.Lock()
@@ -33,9 +33,12 @@ class CatalogScanner:
         total_new = 0
         total_removed = 0
         total_price_changed = 0
+        sold_removed = 0
+        delisted_removed = 0
 
         try:
             await self._ensure_categories(session)
+            archive_ids = await self._fetch_archive_ids()
 
             for category in CATEGORIES:
                 db_category = await session.scalar(select(Category).where(Category.slug == category.slug))
@@ -43,18 +46,24 @@ class CatalogScanner:
                     continue
 
                 scraped = await self.parser.fetch_category(category)
-                total_found += len(scraped)
+                total_found += len({item.external_id for item in scraped})
 
-                new_count, removed_count, price_changed_count = await self._sync_category(
-                    session, db_category, scraped
+                new_count, removed_count, price_changed_count, cat_sold, cat_delisted = (
+                    await self._sync_category(session, db_category, scraped, archive_ids)
                 )
                 total_new += new_count
                 total_removed += removed_count
                 total_price_changed += price_changed_count
+                sold_removed += cat_sold
+                delisted_removed += cat_delisted
+
+            await self._reclassify_removed(session, archive_ids)
 
             scan.products_found = total_found
             scan.new_count = total_new
             scan.removed_count = total_removed
+            scan.sold_count = sold_removed
+            scan.delisted_count = delisted_removed
             scan.price_changed_count = total_price_changed
             scan.finished_at = datetime.now(UTC)
             await session.commit()
@@ -70,6 +79,13 @@ class CatalogScanner:
             session.add(error_scan)
             await session.commit()
             raise
+
+    async def _fetch_archive_ids(self) -> set[str]:
+        archive_ids: set[str] = set()
+        for category in ARCHIVE_CATEGORIES:
+            scraped = await self.parser.fetch_category(category)
+            archive_ids.update(item.external_id for item in scraped)
+        return archive_ids
 
     async def _ensure_categories(self, session: AsyncSession) -> None:
         for category in CATEGORIES:
@@ -90,7 +106,8 @@ class CatalogScanner:
         session: AsyncSession,
         category: Category,
         scraped: list[ScrapedProduct],
-    ) -> tuple[int, int, int]:
+        archive_ids: set[str],
+    ) -> tuple[int, int, int, int, int]:
         now = datetime.now(UTC)
         scraped_map = {item.external_id: item for item in scraped}
         seen_ids = set(scraped_map)
@@ -106,6 +123,8 @@ class CatalogScanner:
         new_count = 0
         removed_count = 0
         price_changed_count = 0
+        sold_removed = 0
+        delisted_removed = 0
 
         for external_id, item in scraped_map.items():
             product = active_products.get(external_id)
@@ -117,6 +136,7 @@ class CatalogScanner:
                     product = restored
                     product.status = ProductStatus.ACTIVE
                     product.removed_at = None
+                    product.removal_reason = None
                     product.last_seen_at = now
                     self._apply_fields(product, item)
                     session.add(
@@ -158,13 +178,33 @@ class CatalogScanner:
 
             product.status = ProductStatus.REMOVED
             product.removed_at = now
+            product.removal_reason = self._resolve_removal_reason(external_id, archive_ids)
+            if product.removal_reason == RemovalReason.SOLD.value:
+                sold_removed += 1
+            else:
+                delisted_removed += 1
             session.add(
                 ProductEvent(product_id=product.id, event_type=EventType.REMOVED)
             )
             removed_count += 1
 
         await session.flush()
-        return new_count, removed_count, price_changed_count
+        return new_count, removed_count, price_changed_count, sold_removed, delisted_removed
+
+    async def _reclassify_removed(self, session: AsyncSession, archive_ids: set[str]) -> None:
+        result = await session.execute(
+            select(Product).where(Product.status == ProductStatus.REMOVED)
+        )
+
+        for product in result.scalars():
+            product.removal_reason = self._resolve_removal_reason(product.external_id, archive_ids)
+
+        await session.flush()
+
+    def _resolve_removal_reason(self, external_id: str, archive_ids: set[str]) -> str:
+        if external_id in archive_ids:
+            return RemovalReason.SOLD.value
+        return RemovalReason.DELISTED.value
 
     def _update_existing(self, session: AsyncSession, product: Product, item: ScrapedProduct) -> int:
         changes = 0

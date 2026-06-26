@@ -14,3 +14,10 @@ CATEGORIES: list[CatalogCategory] = [
     CatalogCategory("accessories", "Аксессуары", "accessories"),
     CatalogCategory("arts", "Предметы искусства", "arts"),
 ]
+
+ARCHIVE_CATEGORIES: list[CatalogCategory] = [
+    CatalogCategory("clocks_archive", "Архив часов", "clocks_archive"),
+    CatalogCategory("jewellery_archive", "Архив ювелирки", "jewelries_archive"),
+    CatalogCategory("accessories_archive", "Архив аксессуаров", "accessories_archive"),
+    CatalogCategory("arts_archive", "Архив искусства", "arts_archive"),
+]

@@ -38,7 +38,8 @@ def build_help_text() -> str:
         "Команды:\n"
         "/status — статус последнего сканирования\n"
         "/scan — запустить сканирование вручную\n"
-        "/sold [дней] — ушедшие с сайта товары (продажи)\n"
+        "/sold [дней] — продано (подтверждено архивом)\n"
+        "/delisted [дней] — снято с витрины (не в архиве)\n"
         "/new [дней] — новые поступления\n"
         "/top [дней] — топ брендов по продажам\n"
         "/fast [дней] — самые ходовые бренды (быстрее уходят)\n"
@@ -64,7 +65,9 @@ def build_status_text(scan: ScanRun | None, active_count: int) -> str:
         f"Товаров в каталоге: {active_count}",
         f"Найдено при скане: {scan.products_found}",
         f"Новых: {scan.new_count}",
-        f"Ушло с сайта: {scan.removed_count}",
+        f"Ушло с витрины: {scan.removed_count}",
+        f"├ Продано (архив): {scan.sold_count}",
+        f"└ Снято с витрины: {scan.delisted_count}",
         f"Изменений цены: {scan.price_changed_count}",
     ]
     if scan.error:
@@ -73,7 +76,22 @@ def build_status_text(scan: ScanRun | None, active_count: int) -> str:
 
 
 def build_sold_report(products: list[Product], period: Period) -> str:
-    header = f"📦 <b>Ушло с сайта {period.label}</b>: {len(products)} шт.\n"
+    header = f"✅ <b>Продано {period.label}</b> (в архиве на сайте): {len(products)} шт.\n"
+    if not products:
+        return header + "\nНет данных за выбранный период."
+
+    lines = [header]
+    for product in products[:30]:
+        removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
+        lines.append(f"{format_product_line(product, include_category=True)} — {removed}")
+
+    if len(products) > 30:
+        lines.append(f"\n… и ещё {len(products) - 30} позиций")
+    return "\n".join(lines)
+
+
+def build_delisted_report(products: list[Product], period: Period) -> str:
+    header = f"📤 <b>Снято с витрины {period.label}</b> (нет в архиве): {len(products)} шт.\n"
     if not products:
         return header + "\nНет данных за выбранный период."
 
@@ -159,6 +177,7 @@ def build_brand_stats_report(stats: dict, period: Period) -> str:
 def build_summary_report(data: dict) -> str:
     period: Period = data["period"]
     sold: list[Product] = data["sold"]
+    delisted: list[Product] = data["delisted"]
     new_items: list[Product] = data["new_items"]
     top_brands: list[tuple[str, int]] = data["top_brands"]
     price_dist: dict[str, int] = data["price_dist"]
@@ -169,7 +188,8 @@ def build_summary_report(data: dict) -> str:
         f"📈 <b>Сводка {period.label}</b>",
         f"Дата: {datetime.now().strftime('%d.%m.%Y')}",
         "",
-        f"Продано (ушло с сайта): <b>{len(sold)}</b> шт.",
+        f"Продано (архив): <b>{len(sold)}</b> шт.",
+        f"Снято с витрины: <b>{len(delisted)}</b> шт.",
         f"Новых поступлений: <b>{len(new_items)}</b> шт.",
     ]
 

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.db.models import Category, EventType, Product, ProductEvent, ProductStatus, ScanRun
+from app.db.models import Category, Product, ProductStatus, RemovalReason, ScanRun
 
 
 @dataclass
@@ -47,6 +47,20 @@ class ReportService:
             .options(joinedload(Product.category))
             .where(
                 Product.status == ProductStatus.REMOVED,
+                Product.removal_reason == RemovalReason.SOLD.value,
+                Product.removed_at >= period.start,
+            )
+            .order_by(Product.removed_at.desc())
+        )
+        return list(result.scalars())
+
+    async def delisted_products(self, session: AsyncSession, period: Period) -> list[Product]:
+        result = await session.execute(
+            select(Product)
+            .options(joinedload(Product.category))
+            .where(
+                Product.status == ProductStatus.REMOVED,
+                Product.removal_reason == RemovalReason.DELISTED.value,
                 Product.removed_at >= period.start,
             )
             .order_by(Product.removed_at.desc())
@@ -67,6 +81,7 @@ class ReportService:
             select(Product.brand, func.count(Product.id))
             .where(
                 Product.status == ProductStatus.REMOVED,
+                Product.removal_reason == RemovalReason.SOLD.value,
                 Product.removed_at >= period.start,
                 Product.brand != "",
             )
@@ -83,6 +98,7 @@ class ReportService:
             select(Product)
             .where(
                 Product.status == ProductStatus.REMOVED,
+                Product.removal_reason == RemovalReason.SOLD.value,
                 Product.removed_at >= period.start,
                 Product.brand != "",
             )
@@ -111,6 +127,7 @@ class ReportService:
             select(Product).where(
                 brand_filter,
                 Product.status == ProductStatus.REMOVED,
+                Product.removal_reason == RemovalReason.SOLD.value,
                 Product.removed_at >= period.start,
             )
         )
@@ -159,6 +176,7 @@ class ReportService:
 
     async def summary(self, session: AsyncSession, period: Period) -> dict:
         sold = await self.sold_products(session, period)
+        delisted = await self.delisted_products(session, period)
         new_items = await self.new_products(session, period)
         top_brands = await self.top_brands(session, period, limit=5)
         price_dist = await self.price_distribution(session, period)
@@ -171,6 +189,7 @@ class ReportService:
         return {
             "period": period,
             "sold": sold,
+            "delisted": delisted,
             "new_items": new_items,
             "top_brands": top_brands,
             "price_dist": price_dist,
