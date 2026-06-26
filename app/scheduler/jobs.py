@@ -31,10 +31,6 @@ async def run_scan() -> None:
 
 
 async def send_report(bot: Bot, days: int, title: str) -> None:
-    if not settings.allowed_user_ids:
-        logger.info("Skipping %s: no TELEGRAM_ALLOWED_USER_IDS configured", title)
-        return
-
     period = Period(days)
     async with async_session() as session:
         data = await report_service.summary(session, period)
