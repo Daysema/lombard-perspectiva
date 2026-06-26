@@ -52,6 +52,8 @@ class CatalogParser:
                     url = f"{url}?page={page}"
 
                 response = await client.get(url)
+                if response.status_code == 404 and page > 1:
+                    break
                 response.raise_for_status()
 
                 page_products = self._parse_page(response.text)
@@ -59,7 +61,7 @@ class CatalogParser:
                     break
 
                 products.extend(page_products)
-                last_page = self._extract_last_page(response.text)
+                last_page = self._extract_last_page(response.text, category.url_path)
                 if page >= last_page:
                     break
 
@@ -125,12 +127,15 @@ class CatalogParser:
 
         return products
 
-    def _extract_last_page(self, html: str) -> int:
+    def _extract_last_page(self, html: str, url_path: str) -> int:
         soup = BeautifulSoup(html, "lxml")
         pages: list[int] = []
 
         for link in soup.select("a.paginate-link"):
-            match = re.search(r"[?&]page=(\d+)", link.get("href", ""))
+            href = link.get("href", "")
+            if url_path not in href:
+                continue
+            match = re.search(r"[?&]page=(\d+)", href)
             if match:
                 pages.append(int(match.group(1)))
 
