@@ -250,7 +250,7 @@ async def cb_menu_new(callback: CallbackQuery) -> None:
         await show_page(callback.message, text, keyboard, edit=True)
 
 
-@router.callback_query(F.data == MENU_TOP | F.data.startswith(f"{MENU_TOP}:"))
+@router.callback_query((F.data == MENU_TOP) | F.data.startswith(f"{MENU_TOP}:"))
 async def cb_menu_top(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message and callback.data:
