@@ -52,6 +52,7 @@ async def main() -> None:
         )
 
     dispatcher.message.middleware(AuthMiddleware())
+    dispatcher.callback_query.middleware(AuthMiddleware())
     dispatcher.include_router(router)
 
     await setup_bot_commands(bot)
