@@ -15,7 +15,7 @@ from app.config import settings
 from app.db.session import init_db
 from app.notifications.alerts import format_exception, send_error_alert, send_fatal_startup_alert
 from app.notifications.logging_handler import TelegramAlertHandler
-from app.scheduler.jobs import run_scan, setup_scheduler
+from app.scheduler.jobs import setup_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,8 +81,6 @@ async def main() -> None:
         asyncio.create_task(send_error_alert(bot, "Ошибка asyncio", body))
 
     loop.set_exception_handler(on_asyncio_exception)
-
-    asyncio.create_task(run_scan(bot))
 
     logger.info("Bot started for admins: %s", settings.allowed_user_ids)
     await dispatcher.start_polling(bot)
