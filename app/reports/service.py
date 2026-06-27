@@ -120,16 +120,21 @@ class ReportService:
         averages.sort(key=lambda item: item[1])
         return averages[:limit]
 
-    async def brand_stats(self, session: AsyncSession, brand: str, period: Period) -> dict:
-        brand_filter = Product.brand.ilike(f"%{brand}%")
+    async def brand_stats(
+        self, session: AsyncSession, brand: str, period: Period, *, exact: bool = False
+    ) -> dict:
+        brand_filter = Product.brand == brand if exact else Product.brand.ilike(f"%{brand}%")
 
         sold_result = await session.execute(
-            select(Product).where(
+            select(Product)
+            .options(joinedload(Product.category))
+            .where(
                 brand_filter,
                 Product.status == ProductStatus.REMOVED,
                 Product.removal_reason == RemovalReason.SOLD.value,
                 Product.removed_at >= period.start,
             )
+            .order_by(Product.removed_at.desc())
         )
         sold = list(sold_result.scalars())
 
@@ -152,6 +157,12 @@ class ReportService:
             "avg_price": avg_price,
             "sold": sold,
         }
+
+    async def distinct_brands(self, session: AsyncSession) -> list[str]:
+        result = await session.execute(
+            select(Product.brand).where(Product.brand != "").distinct()
+        )
+        return [row[0] for row in result.all()]
 
     async def price_distribution(self, session: AsyncSession, period: Period) -> dict[str, int]:
         products = await self.sold_products(session, period)

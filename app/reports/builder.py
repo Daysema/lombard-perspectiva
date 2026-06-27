@@ -7,6 +7,14 @@ from app.db.models import Product, ScanRun
 from app.reports.service import PRICE_BUCKETS, Period
 
 TELEGRAM_MESSAGE_LIMIT = 4000
+ITEMS_PER_PAGE = 12
+
+
+def paginate_list(items: list, page: int, per_page: int = ITEMS_PER_PAGE) -> tuple[list, int, int]:
+    total_pages = max(1, (len(items) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+    start = page * per_page
+    return items[start : start + per_page], page, total_pages
 
 
 def format_msk(dt: datetime) -> str:
@@ -80,59 +88,59 @@ def build_status_text(scan: ScanRun | None, active_count: int) -> str:
     return "\n".join(lines)
 
 
-def build_sold_report(products: list[Product], period: Period) -> str:
+def build_sold_report(products: list[Product], period: Period, page: int = 0) -> tuple[str, int, int]:
     header = f"✅ <b>Продано {period.label}</b> (в архиве на сайте): {len(products)} шт.\n"
     if not products:
-        return header + "\nНет данных за выбранный период."
+        return header + "\nНет данных за выбранный период.", 0, 1
 
+    page_items, page, total_pages = paginate_list(products, page)
     lines = [header]
-    for product in products[:30]:
+    if total_pages > 1:
+        lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
+    for product in page_items:
         removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
         lines.append(f"{format_product_line(product, include_category=True)} — {removed}")
-
-    if len(products) > 30:
-        lines.append(f"\n… и ещё {len(products) - 30} позиций")
-    return "\n".join(lines)
+    return "\n".join(lines), page, total_pages
 
 
-def build_delisted_report(products: list[Product], period: Period) -> str:
+def build_delisted_report(products: list[Product], period: Period, page: int = 0) -> tuple[str, int, int]:
     header = f"📤 <b>Снято с витрины {period.label}</b> (нет в архиве): {len(products)} шт.\n"
     if not products:
-        return header + "\nНет данных за выбранный период."
+        return header + "\nНет данных за выбранный период.", 0, 1
 
+    page_items, page, total_pages = paginate_list(products, page)
     lines = [header]
-    for product in products[:30]:
+    if total_pages > 1:
+        lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
+    for product in page_items:
         removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
         lines.append(f"{format_product_line(product, include_category=True)} — {removed}")
-
-    if len(products) > 30:
-        lines.append(f"\n… и ещё {len(products) - 30} позиций")
-    return "\n".join(lines)
+    return "\n".join(lines), page, total_pages
 
 
-def build_new_report(products: list[Product], period: Period) -> str:
+def build_new_report(products: list[Product], period: Period, page: int = 0) -> tuple[str, int, int]:
     header = f"🆕 <b>Новые поступления {period.label}</b>: {len(products)} шт.\n"
     if not products:
-        return header + "\nНет новых товаров за выбранный период."
+        return header + "\nНет новых товаров за выбранный период.", 0, 1
 
+    page_items, page, total_pages = paginate_list(products, page)
     lines = [header]
-    for product in products[:30]:
+    if total_pages > 1:
+        lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
+    for product in page_items:
         appeared = product.first_seen_at.strftime("%d.%m") if product.first_seen_at else "?"
         lines.append(f"{format_product_line(product, include_category=True)} — {appeared}")
+    return "\n".join(lines), page, total_pages
 
-    if len(products) > 30:
-        lines.append(f"\n… и ещё {len(products) - 30} позиций")
-    return "\n".join(lines)
+
+def build_top_brands_header(period: Period) -> str:
+    return f"🏆 <b>Топ брендов по продажам {period.label}</b>\n\nВыберите бренд:"
 
 
 def build_top_brands_report(brands: list[tuple[str, int]], period: Period) -> str:
-    lines = [f"🏆 <b>Топ брендов по продажам {period.label}</b>"]
+    lines = [build_top_brands_header(period)]
     if not brands:
         lines.append("\nНет данных.")
-        return "\n".join(lines)
-
-    for index, (brand, count) in enumerate(brands, start=1):
-        lines.append(f"{index}. {_esc(brand)} — {count} шт.")
     return "\n".join(lines)
 
 
@@ -161,7 +169,7 @@ def build_price_report(distribution: dict[str, int], period: Period) -> str:
     return "\n".join(lines)
 
 
-def build_brand_stats_report(stats: dict, period: Period) -> str:
+def build_brand_stats_report(stats: dict, period: Period, page: int = 0) -> tuple[str, int, int]:
     brand = _esc(stats["brand"])
     lines = [
         f"📊 <b>Статистика: {brand}</b> ({period.label})",
@@ -172,11 +180,16 @@ def build_brand_stats_report(stats: dict, period: Period) -> str:
         lines.append(f"Средняя цена проданного: {format_money(stats['avg_price'])}")
 
     sold: list[Product] = stats["sold"]
+    total_pages = 1
     if sold:
-        lines.append("\nПоследние продажи:")
-        for product in sold[:10]:
-            lines.append(format_product_line(product))
-    return "\n".join(lines)
+        lines.append(f"\n<b>Продано {period.label}:</b>")
+        page_items, page, total_pages = paginate_list(sold, page)
+        if total_pages > 1:
+            lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
+        for product in page_items:
+            removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
+            lines.append(f"{format_product_line(product, include_category=True)} — {removed}")
+    return "\n".join(lines), page, total_pages
 
 
 def build_summary_report(data: dict) -> str:
