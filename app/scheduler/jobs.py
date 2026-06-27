@@ -62,8 +62,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
 
     scheduler.add_job(
         run_scan,
-        "interval",
-        hours=settings.scan_interval_hours,
+        CronTrigger(hour="0,12", minute=0, timezone=tz),
         args=[bot],
         id="catalog_scan",
         replace_existing=True,

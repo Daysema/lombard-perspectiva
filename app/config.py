@@ -10,10 +10,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://lombard:lombard@postgres:5432/lombard"
     site_base_url: str = "https://lombard-perspectiva.ru"
 
-    scan_interval_hours: int = 6
     request_delay_seconds: float = 1.5
     http_timeout_seconds: float = 120.0
     http_max_retries: int = 3
+    http_proxy: str | None = None
 
     report_daily_hour: int = 9
     report_weekly_day: int = 0

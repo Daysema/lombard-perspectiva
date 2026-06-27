@@ -59,7 +59,7 @@ POSTGRES_PASSWORD=MyStr0ng_Passw0rd!
 docker compose up -d --build
 ```
 
-Сканирование выполняется автоматически **каждые 6 часов** (каталог + архивы). Результат — `/status`.
+Сканирование выполняется автоматически **в 00:00 и 12:00 по МСК** (каталог + архивы). Результат — `/status`.
 
 ### 4. Проверить логи
 
@@ -90,7 +90,7 @@ docker compose logs -f bot
 
 | Событие | Когда |
 |---------|-------|
-| Сканирование каталога | каждые 6 часов |
+| Сканирование каталога | каждый день в 00:00 и 12:00 |
 | Ежедневный отчёт | каждый день в 09:00 |
 | Еженедельный отчёт | понедельник, 09:00 |
 | Ежемесячный отчёт | 1-е число, 09:00 |
@@ -98,11 +98,13 @@ docker compose logs -f bot
 Настраивается в `.env`:
 
 ```env
-SCAN_INTERVAL_HOURS=6
 REPORT_DAILY_HOUR=9
 REPORT_WEEKLY_DAY=0
 REPORT_MONTHLY_DAY=1
 TIMEZONE=Europe/Moscow
+HTTP_TIMEOUT_SECONDS=120
+HTTP_MAX_RETRIES=3
+# HTTP_PROXY=http://user:pass@host:port
 ```
 
 ## Управление на сервере

@@ -53,6 +53,17 @@ class CatalogParser:
             pool=30.0,
         )
         self.max_retries = settings.http_max_retries
+        self._prefer_proxy = False
+
+    def _client_kwargs(self, proxy: str | None = None) -> dict:
+        kwargs: dict = {
+            "headers": {"User-Agent": USER_AGENT},
+            "timeout": self.timeout,
+            "follow_redirects": True,
+        }
+        if proxy:
+            kwargs["proxy"] = proxy
+        return kwargs
 
     async def _get_with_retry(self, client: httpx.AsyncClient, url: str) -> httpx.Response:
         last_error: Exception | None = None
@@ -76,36 +87,63 @@ class CatalogParser:
         assert last_error is not None
         raise last_error
 
+    async def _fetch_url(self, url: str) -> httpx.Response:
+        routes: list[tuple[str | None, str]] = []
+        if self._prefer_proxy and settings.http_proxy:
+            routes = [(settings.http_proxy, "через прокси")]
+        else:
+            routes = [(None, "напрямую")]
+            if settings.http_proxy:
+                routes.append((settings.http_proxy, "через прокси"))
+
+        last_error: Exception | None = None
+        for index, (proxy, label) in enumerate(routes):
+            try:
+                async with httpx.AsyncClient(**self._client_kwargs(proxy)) as client:
+                    response = await self._get_with_retry(client, url)
+                if proxy is not None:
+                    self._prefer_proxy = True
+                return response
+            except _RETRYABLE_ERRORS as exc:
+                last_error = exc
+                if index < len(routes) - 1:
+                    logger.warning(
+                        "Запрос не удался %s (%s), пробую %s",
+                        label,
+                        type(exc).__name__,
+                        routes[index + 1][1],
+                    )
+                    continue
+                raise
+
+        assert last_error is not None
+        raise last_error
+
     async def fetch_category(self, category: CatalogCategory) -> list[ScrapedProduct]:
         products: list[ScrapedProduct] = []
         page = 1
 
-        async with httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT},
-            timeout=self.timeout,
-            follow_redirects=True,
-        ) as client:
-            while True:
-                url = f"{self.base_url}/{category.url_path}/"
-                if page > 1:
-                    url = f"{url}?page={page}"
+        while True:
+            url = f"{self.base_url}/{category.url_path}/"
+            if page > 1:
+                url = f"{url}?page={page}"
 
-                response = await self._get_with_retry(client, url)
-                if response.status_code == 404 and page > 1:
-                    break
-                response.raise_for_status()
+            response = await self._fetch_url(url)
+            if response.status_code == 404 and page > 1:
+                break
+            response.raise_for_status()
 
-                page_products = self._parse_page(response.text)
-                if not page_products:
-                    break
+            page_products = self._parse_page(response.text)
+            if not page_products:
+                break
 
-                products.extend(page_products)
-                last_page = self._extract_last_page(response.text, category.url_path)
-                if page >= last_page:
-                    break
+            products.extend(page_products)
+            last_page = self._extract_last_page(response.text, category.url_path)
+            if page >= last_page:
+                break
 
-                page += 1
-                await asyncio.sleep(self.delay)
+            page += 1
+            await asyncio.sleep(self.delay)
 
         return products
 

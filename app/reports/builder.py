@@ -1,10 +1,19 @@
 import html
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
+from app.config import settings
 from app.db.models import Product, ScanRun
 from app.reports.service import PRICE_BUCKETS, Period
 
 TELEGRAM_MESSAGE_LIMIT = 4000
+
+
+def format_msk(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    msk = dt.astimezone(ZoneInfo(settings.timezone))
+    return msk.strftime("%d.%m.%Y %H:%M") + " МСК"
 
 
 def format_money(value: float | None) -> str:
@@ -36,7 +45,7 @@ def build_help_text() -> str:
     return (
         "🕵️ <b>Мониторинг lombard-perspectiva.ru</b>\n\n"
         "Команды:\n"
-        "/status — статус последнего сканирования (авто каждые 6 ч)\n"
+        "/status — статус последнего сканирования (авто в 00:00 и 12:00 МСК)\n"
         "/sold [дней] — продано (подтверждено архивом)\n"
         "/delisted [дней] — снято с витрины (не в архиве)\n"
         "/new [дней] — новые поступления\n"
@@ -55,7 +64,9 @@ def build_status_text(scan: ScanRun | None, active_count: int) -> str:
         return "Сканирование ещё не выполнялось."
 
     if scan.finished_at:
-        finished = scan.finished_at.strftime("%d.%m.%Y %H:%M")
+        finished = format_msk(scan.finished_at)
+    elif scan.started_at:
+        finished = f"в процессе (начато {format_msk(scan.started_at)})"
     else:
         finished = "в процессе"
 
