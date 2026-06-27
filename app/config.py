@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     scan_interval_hours: int = 6
     request_delay_seconds: float = 1.5
+    http_timeout_seconds: float = 120.0
+    http_max_retries: int = 3
 
     report_daily_hour: int = 9
     report_weekly_day: int = 0

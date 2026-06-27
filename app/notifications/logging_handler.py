@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 
 from aiogram import Bot
 
@@ -23,8 +22,6 @@ class TelegramAlertHandler(logging.Handler):
 
         try:
             message = self.format(record)
-            if record.exc_info:
-                message += "\n\n" + "".join(traceback.format_exception(*record.exc_info))
 
             loop = asyncio.get_running_loop()
             loop.create_task(

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -10,11 +11,20 @@ from bs4 import BeautifulSoup
 from app.config import settings
 from app.scraper.categories import CatalogCategory
 
+logger = logging.getLogger(__name__)
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 PRICE_ON_REQUEST_MARKERS = ("цена по запросу", "price on request")
+_RETRYABLE_ERRORS = (
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.NetworkError,
+)
 
 
 @dataclass
@@ -36,6 +46,35 @@ class CatalogParser:
     def __init__(self, base_url: str | None = None, delay: float | None = None) -> None:
         self.base_url = (base_url or settings.site_base_url).rstrip("/")
         self.delay = delay if delay is not None else settings.request_delay_seconds
+        self.timeout = httpx.Timeout(
+            connect=30.0,
+            read=settings.http_timeout_seconds,
+            write=30.0,
+            pool=30.0,
+        )
+        self.max_retries = settings.http_max_retries
+
+    async def _get_with_retry(self, client: httpx.AsyncClient, url: str) -> httpx.Response:
+        last_error: Exception | None = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                return await client.get(url)
+            except _RETRYABLE_ERRORS as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                wait = 2**attempt
+                logger.warning(
+                    "Сетевая ошибка (%s) для %s, повтор %s/%s через %s с",
+                    type(exc).__name__,
+                    url,
+                    attempt,
+                    self.max_retries,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+        assert last_error is not None
+        raise last_error
 
     async def fetch_category(self, category: CatalogCategory) -> list[ScrapedProduct]:
         products: list[ScrapedProduct] = []
@@ -43,7 +82,7 @@ class CatalogParser:
 
         async with httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT},
-            timeout=60.0,
+            timeout=self.timeout,
             follow_redirects=True,
         ) as client:
             while True:
@@ -51,7 +90,7 @@ class CatalogParser:
                 if page > 1:
                     url = f"{url}?page={page}"
 
-                response = await client.get(url)
+                response = await self._get_with_retry(client, url)
                 if response.status_code == 404 and page > 1:
                     break
                 response.raise_for_status()
