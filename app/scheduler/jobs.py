@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.db.session import async_session
 from app.reports.builder import build_summary_report, split_message
 from app.reports.service import Period, report_service
 from app.scraper.scanner import CatalogScanner
