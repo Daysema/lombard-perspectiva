@@ -2,6 +2,7 @@ import re
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import (
@@ -77,11 +78,33 @@ def parse_brand_and_days(command: CommandObject | None) -> tuple[str | None, int
     return brand, days
 
 
-async def show_page(message: Message, text: str, keyboard: InlineKeyboardMarkup, *, edit: bool) -> None:
-    if edit:
-        await message.edit_text(text, reply_markup=keyboard)
-    else:
-        await message.answer(text, reply_markup=keyboard)
+async def show_page(
+    message: Message,
+    text: str,
+    keyboard: InlineKeyboardMarkup | None,
+    *,
+    edit: bool = False,
+) -> None:
+    try:
+        if edit:
+            await message.edit_text(text, reply_markup=keyboard)
+        else:
+            await message.answer(text, reply_markup=keyboard)
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc):
+            return
+        if edit:
+            await message.answer(text, reply_markup=keyboard)
+        else:
+            raise
+
+
+async def show_loading(callback: CallbackQuery) -> None:
+    if callback.message:
+        try:
+            await callback.message.edit_text("⏳ Загрузка...")
+        except TelegramBadRequest:
+            pass
 
 
 async def fetch_status_text() -> str:
@@ -231,9 +254,10 @@ async def cb_menu_new(callback: CallbackQuery) -> None:
 async def cb_menu_top(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message and callback.data:
+        await show_loading(callback)
         days = parse_top_days(callback.data)
         text, keyboard = await fetch_top_view(days)
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        await show_page(callback.message, text, keyboard, edit=True)
 
 
 @router.callback_query(F.data.startswith("top_brand:"))
@@ -246,6 +270,7 @@ async def cb_top_brand(callback: CallbackQuery) -> None:
     if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
         return
 
+    await show_loading(callback)
     days = int(parts[1])
     brand_index = int(parts[2])
     result = await fetch_brand_detail_view(days, brand_index)

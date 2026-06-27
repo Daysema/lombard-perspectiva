@@ -133,12 +133,14 @@ class CatalogParser:
                 break
             response.raise_for_status()
 
-            page_products = self._parse_page(response.text)
+            page_products = await asyncio.to_thread(self._parse_page, response.text)
             if not page_products:
                 break
 
             products.extend(page_products)
-            last_page = self._extract_last_page(response.text, category.url_path)
+            last_page = await asyncio.to_thread(
+                self._extract_last_page, response.text, category.url_path
+            )
             if page >= last_page:
                 break
 

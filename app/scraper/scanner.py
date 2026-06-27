@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, EventType, Product, ProductEvent, ProductStatus, RemovalReason, ScanRun
+from app.db.session import async_session
 from app.scraper.categories import ARCHIVE_CATEGORIES, CATEGORIES
 from app.scraper.parser import CatalogParser, ScrapedProduct
 
@@ -18,69 +19,92 @@ class CatalogScanner:
     def __init__(self, parser: CatalogParser | None = None) -> None:
         self.parser = parser or CatalogParser()
 
-    async def run(self, session: AsyncSession) -> ScanRun:
+    async def run(self) -> ScanRun:
         if _scan_lock.locked():
             raise RuntimeError("Сканирование уже выполняется, дождитесь завершения")
 
         async with _scan_lock:
-            return await self._run_locked(session)
+            return await self._run_locked()
 
-    async def _run_locked(self, session: AsyncSession) -> ScanRun:
+    async def _run_locked(self) -> ScanRun:
         started_at = datetime.now(UTC)
-        scan = ScanRun(started_at=started_at)
-        session.add(scan)
-        await session.flush()
+        scan_id = await self._start_scan(started_at)
 
-        total_found = 0
-        total_new = 0
-        total_removed = 0
-        total_price_changed = 0
-        sold_removed = 0
-        delisted_removed = 0
+        totals = {
+            "products_found": 0,
+            "new_count": 0,
+            "removed_count": 0,
+            "price_changed_count": 0,
+            "sold_count": 0,
+            "delisted_count": 0,
+        }
 
         try:
-            await self._ensure_categories(session)
             archive_ids = await self._fetch_archive_ids()
+            await self._ensure_categories()
 
             for category in CATEGORIES:
-                db_category = await session.scalar(select(Category).where(Category.slug == category.slug))
-                if db_category is None:
-                    continue
-
                 scraped = await self.parser.fetch_category(category)
-                total_found += len({item.external_id for item in scraped})
+                totals["products_found"] += len({item.external_id for item in scraped})
 
-                new_count, removed_count, price_changed_count, cat_sold, cat_delisted = (
-                    await self._sync_category(session, db_category, scraped, archive_ids)
-                )
-                total_new += new_count
-                total_removed += removed_count
-                total_price_changed += price_changed_count
-                sold_removed += cat_sold
-                delisted_removed += cat_delisted
+                async with async_session() as session:
+                    db_category = await session.scalar(
+                        select(Category).where(Category.slug == category.slug)
+                    )
+                    if db_category is None:
+                        continue
 
-            await self._reclassify_removed(session, archive_ids)
+                    new_count, removed_count, price_changed_count, cat_sold, cat_delisted = (
+                        await self._sync_category(session, db_category, scraped, archive_ids)
+                    )
+                    await session.commit()
 
-            scan.products_found = total_found
-            scan.new_count = total_new
-            scan.removed_count = total_removed
-            scan.sold_count = sold_removed
-            scan.delisted_count = delisted_removed
-            scan.price_changed_count = total_price_changed
+                totals["new_count"] += new_count
+                totals["removed_count"] += removed_count
+                totals["price_changed_count"] += price_changed_count
+                totals["sold_count"] += cat_sold
+                totals["delisted_count"] += cat_delisted
+
+            async with async_session() as session:
+                await self._reclassify_removed(session, archive_ids)
+                await session.commit()
+
+            return await self._finish_scan(scan_id, totals)
+        except Exception as exc:
+            await self._finish_scan(scan_id, totals, error=str(exc))
+            raise
+
+    async def _start_scan(self, started_at: datetime) -> int:
+        async with async_session() as session:
+            scan = ScanRun(started_at=started_at)
+            session.add(scan)
+            await session.commit()
+            await session.refresh(scan)
+            return scan.id
+
+    async def _finish_scan(
+        self,
+        scan_id: int,
+        totals: dict[str, int],
+        *,
+        error: str | None = None,
+    ) -> ScanRun:
+        async with async_session() as session:
+            scan = await session.get(ScanRun, scan_id)
+            if scan is None:
+                raise RuntimeError(f"ScanRun {scan_id} not found")
+
+            scan.products_found = totals["products_found"]
+            scan.new_count = totals["new_count"]
+            scan.removed_count = totals["removed_count"]
+            scan.sold_count = totals["sold_count"]
+            scan.delisted_count = totals["delisted_count"]
+            scan.price_changed_count = totals["price_changed_count"]
             scan.finished_at = datetime.now(UTC)
+            scan.error = error
             await session.commit()
             await session.refresh(scan)
             return scan
-        except Exception as exc:
-            await session.rollback()
-            error_scan = ScanRun(
-                started_at=started_at,
-                finished_at=datetime.now(UTC),
-                error=str(exc),
-            )
-            session.add(error_scan)
-            await session.commit()
-            raise
 
     async def _fetch_archive_ids(self) -> set[str]:
         archive_ids: set[str] = set()
@@ -92,19 +116,20 @@ class CatalogScanner:
         logger.info("Всего в архивах: %s уникальных URL", len(archive_ids))
         return archive_ids
 
-    async def _ensure_categories(self, session: AsyncSession) -> None:
-        for category in CATEGORIES:
-            stmt = (
-                insert(Category)
-                .values(
-                    slug=category.slug,
-                    name=category.name,
-                    url_path=category.url_path,
+    async def _ensure_categories(self) -> None:
+        async with async_session() as session:
+            for category in CATEGORIES:
+                stmt = (
+                    insert(Category)
+                    .values(
+                        slug=category.slug,
+                        name=category.name,
+                        url_path=category.url_path,
+                    )
+                    .on_conflict_do_nothing(index_elements=["slug"])
                 )
-                .on_conflict_do_nothing(index_elements=["slug"])
-            )
-            await session.execute(stmt)
-        await session.flush()
+                await session.execute(stmt)
+            await session.commit()
 
     async def _sync_category(
         self,
@@ -139,15 +164,12 @@ class CatalogScanner:
                 )
                 if restored:
                     if restored.removal_reason == RemovalReason.SOLD.value:
-                        # Проданный лот с этим URL остаётся в истории продаж.
-                        # Новый завоз той же модели — всегда новый URL и новая запись в БД.
                         logger.warning(
                             "Проданный товар снова на витрине (тот же URL): %s — не восстанавливаем",
                             external_id,
                         )
                         continue
 
-                    # Тот же URL — тот же лот (вернули после снятия с витрины).
                     product = restored
                     product.status = ProductStatus.ACTIVE
                     product.removed_at = None
@@ -213,7 +235,6 @@ class CatalogScanner:
 
         for product in result.scalars():
             if product.removal_reason == RemovalReason.SOLD.value:
-                # Продажа не отменяется: новый завоз = новый URL, старая запись остаётся sold.
                 continue
             if product.external_id in archive_ids:
                 product.removal_reason = RemovalReason.SOLD.value

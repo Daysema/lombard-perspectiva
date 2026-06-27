@@ -6,7 +6,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.db.session import async_session
 from app.reports.builder import build_summary_report, split_message
 from app.reports.service import Period, report_service
 from app.scraper.scanner import CatalogScanner
@@ -18,8 +17,7 @@ async def run_scan(bot: Bot) -> None:
     logger.info("Scheduled scan started")
     scanner = CatalogScanner()
     try:
-        async with async_session() as session:
-            scan = await scanner.run(session)
+        scan = await scanner.run()
         logger.info(
             "Scan finished: found=%s new=%s removed=%s",
             scan.products_found,
