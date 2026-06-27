@@ -92,7 +92,7 @@ class ReportService:
         return [(brand, count) for brand, count in result.all()]
 
     async def fastest_selling_brands(
-        self, session: AsyncSession, period: Period, limit: int = 5
+        self, session: AsyncSession, period: Period, limit: int = 10
     ) -> list[tuple[str, float, int]]:
         result = await session.execute(
             select(Product)

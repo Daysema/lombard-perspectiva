@@ -1,12 +1,14 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.pagination import (
+    PG_BRAND_FAST,
     PG_BRAND_STATS,
     PG_BRAND_TOP,
     PG_DELISTED,
     PG_NEW,
     PG_NOOP,
     PG_SOLD,
+    pg_brand_fast,
     pg_brand_stats,
     pg_brand_top,
     pg_delisted,
@@ -28,15 +30,22 @@ MENU_REPORT = "menu:report"
 DEFAULT_DAYS = 7
 
 
-def parse_top_days(callback_data: str) -> int:
+def parse_menu_days(callback_data: str) -> int:
     parts = callback_data.split(":")
     if len(parts) >= 3 and parts[2].isdigit():
         return int(parts[2])
     return DEFAULT_DAYS
 
 
+parse_top_days = parse_menu_days
+
+
 def top_brand_callback(days: int, index: int) -> str:
     return f"top_brand:{days}:{index}"
+
+
+def fast_brand_callback(days: int, index: int) -> str:
+    return f"fast_brand:{days}:{index}"
 
 
 def back_keyboard() -> InlineKeyboardMarkup:
@@ -77,6 +86,19 @@ def top_brands_keyboard(brands: list[tuple[str, int]], days: int) -> InlineKeybo
             label = label[:57] + "..."
         rows.append(
             [InlineKeyboardButton(text=label, callback_data=top_brand_callback(days, index))]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=MENU_MAIN)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def fast_brands_keyboard(brands: list[tuple[str, float, int]], days: int) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, (brand, avg_days, count) in enumerate(brands):
+        label = f"{brand} — {avg_days:.1f} дн. ({count} шт.)"
+        if len(label) > 60:
+            label = label[:57] + "..."
+        rows.append(
+            [InlineKeyboardButton(text=label, callback_data=fast_brand_callback(days, index))]
         )
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=MENU_MAIN)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -127,6 +149,9 @@ def list_pagination_keyboard(
     elif section == PG_BRAND_TOP and brand_index is not None:
         prev_data = pg_brand_top(days, brand_index, page - 1) if page > 0 else None
         next_data = pg_brand_top(days, brand_index, page + 1) if page < total_pages - 1 else None
+    elif section == PG_BRAND_FAST and brand_index is not None:
+        prev_data = pg_brand_fast(days, brand_index, page - 1) if page > 0 else None
+        next_data = pg_brand_fast(days, brand_index, page + 1) if page < total_pages - 1 else None
     elif section == PG_BRAND_STATS and brand_name:
         prev_data = pg_brand_stats(days, page - 1, brand_name) if page > 0 else None
         next_data = pg_brand_stats(days, page + 1, brand_name) if page < total_pages - 1 else None
@@ -140,6 +165,11 @@ def list_pagination_keyboard(
     if section == PG_BRAND_TOP and brand_index is not None:
         rows.append(
             [InlineKeyboardButton(text="◀️ К топу брендов", callback_data=f"{MENU_TOP}:{days}")]
+        )
+        rows.append([InlineKeyboardButton(text="◀️ В меню", callback_data=MENU_MAIN)])
+    elif section == PG_BRAND_FAST and brand_index is not None:
+        rows.append(
+            [InlineKeyboardButton(text="◀️ К ходовым", callback_data=f"{MENU_FAST}:{days}")]
         )
         rows.append([InlineKeyboardButton(text="◀️ В меню", callback_data=MENU_MAIN)])
     else:

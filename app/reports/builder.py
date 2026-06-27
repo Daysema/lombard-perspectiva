@@ -144,15 +144,60 @@ def build_top_brands_report(brands: list[tuple[str, int]], period: Period) -> st
     return "\n".join(lines)
 
 
+def build_fast_brands_header(period: Period) -> str:
+    return f"🔥 <b>Ходовые бренды {period.label}</b> (среднее время на сайте)\n\nВыберите бренд:"
+
+
 def build_fast_brands_report(brands: list[tuple[str, float, int]], period: Period) -> str:
-    lines = [f"🔥 <b>Ходовые бренды {period.label}</b> (среднее время на сайте)"]
+    lines = [build_fast_brands_header(period)]
     if not brands:
         lines.append("\nНет данных.")
-        return "\n".join(lines)
-
-    for index, (brand, avg_days, count) in enumerate(brands, start=1):
-        lines.append(f"{index}. {_esc(brand)} — {avg_days:.1f} дн. ({count} шт.)")
     return "\n".join(lines)
+
+
+def _days_on_site(product: Product) -> float | None:
+    if product.removed_at is None or product.first_seen_at is None:
+        return None
+    return max((product.removed_at - product.first_seen_at).total_seconds() / 86400, 0)
+
+
+def build_brand_stats_report(
+    stats: dict,
+    period: Period,
+    page: int = 0,
+    *,
+    show_time_on_site: bool = False,
+) -> tuple[str, int, int]:
+    brand = _esc(stats["brand"])
+    icon = "🔥" if show_time_on_site else "📊"
+    title = "Ходовой бренд" if show_time_on_site else "Статистика"
+    lines = [
+        f"{icon} <b>{title}: {brand}</b> ({period.label})",
+        f"Продано: {stats['sold_count']} шт.",
+        f"Сейчас в каталоге: {stats['active_count']} шт.",
+    ]
+    if stats.get("avg_days_on_site") is not None:
+        lines.append(f"Среднее время на сайте: {stats['avg_days_on_site']:.1f} дн.")
+    if stats["avg_price"] is not None:
+        lines.append(f"Средняя цена проданного: {format_money(stats['avg_price'])}")
+
+    sold: list[Product] = stats["sold"]
+    total_pages = 1
+    if sold:
+        list_title = "Проданные позиции" if show_time_on_site else f"Продано {period.label}"
+        lines.append(f"\n<b>{list_title}:</b>")
+        page_items, page, total_pages = paginate_list(sold, page)
+        if total_pages > 1:
+            lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
+        for product in page_items:
+            removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
+            line = f"{format_product_line(product, include_category=True)} — {removed}"
+            if show_time_on_site:
+                days = _days_on_site(product)
+                if days is not None:
+                    line += f", {days:.1f} дн. на сайте"
+            lines.append(line)
+    return "\n".join(lines), page, total_pages
 
 
 def build_price_report(distribution: dict[str, int], period: Period) -> str:
@@ -167,29 +212,6 @@ def build_price_report(distribution: dict[str, int], period: Period) -> str:
         if count:
             lines.append(f"• {label}: {count} шт.")
     return "\n".join(lines)
-
-
-def build_brand_stats_report(stats: dict, period: Period, page: int = 0) -> tuple[str, int, int]:
-    brand = _esc(stats["brand"])
-    lines = [
-        f"📊 <b>Статистика: {brand}</b> ({period.label})",
-        f"Продано: {stats['sold_count']} шт.",
-        f"Сейчас в каталоге: {stats['active_count']} шт.",
-    ]
-    if stats["avg_price"] is not None:
-        lines.append(f"Средняя цена проданного: {format_money(stats['avg_price'])}")
-
-    sold: list[Product] = stats["sold"]
-    total_pages = 1
-    if sold:
-        lines.append(f"\n<b>Продано {period.label}:</b>")
-        page_items, page, total_pages = paginate_list(sold, page)
-        if total_pages > 1:
-            lines.append(f"📄 Страница {page + 1} из {total_pages}\n")
-        for product in page_items:
-            removed = product.removed_at.strftime("%d.%m") if product.removed_at else "?"
-            lines.append(f"{format_product_line(product, include_category=True)} — {removed}")
-    return "\n".join(lines), page, total_pages
 
 
 def build_summary_report(data: dict) -> str:

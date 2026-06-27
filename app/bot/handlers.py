@@ -20,10 +20,12 @@ from app.bot.keyboards import (
     back_keyboard,
     list_pagination_keyboard,
     main_menu_keyboard,
-    parse_top_days,
+    parse_menu_days,
     top_brands_keyboard,
+    fast_brands_keyboard,
 )
 from app.bot.pagination import (
+    PG_BRAND_FAST,
     PG_BRAND_STATS,
     PG_BRAND_TOP,
     PG_DELISTED,
@@ -185,11 +187,34 @@ async def fetch_brand_stats_view(
     return text, keyboard
 
 
-async def fetch_fast_text(days: int) -> str:
+async def fetch_fast_view(days: int) -> tuple[str, InlineKeyboardMarkup]:
     period = Period(days)
     async with async_session() as session:
         brands = await report_service.fastest_selling_brands(session, period)
-    return build_fast_brands_report(brands, period)
+    text = build_fast_brands_report(brands, period)
+    keyboard = fast_brands_keyboard(brands, days) if brands else back_keyboard()
+    return text, keyboard
+
+
+async def fetch_fast_brand_detail_view(
+    days: int, brand_index: int, page: int = 0
+) -> tuple[str, InlineKeyboardMarkup] | None:
+    period = Period(days)
+    async with async_session() as session:
+        brands = await report_service.fastest_selling_brands(session, period)
+        if brand_index >= len(brands):
+            return None
+        brand_name, avg_days, _ = brands[brand_index]
+        stats = await report_service.brand_stats(session, brand_name, period, exact=True)
+        stats["avg_days_on_site"] = avg_days
+
+    text, page, total_pages = build_brand_stats_report(
+        stats, period, page, show_time_on_site=True
+    )
+    keyboard = list_pagination_keyboard(
+        PG_BRAND_FAST, days, page, total_pages, brand_index=brand_index
+    )
+    return text, keyboard
 
 
 async def fetch_price_text(days: int) -> str:
@@ -255,7 +280,7 @@ async def cb_menu_top(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message and callback.data:
         await show_loading(callback)
-        days = parse_top_days(callback.data)
+        days = parse_menu_days(callback.data)
         text, keyboard = await fetch_top_view(days)
         await show_page(callback.message, text, keyboard, edit=True)
 
@@ -311,6 +336,14 @@ async def cb_pagination(callback: CallbackQuery) -> None:
             await callback.answer("Бренд не найден", show_alert=True)
             return
         text, keyboard = result
+    elif parsed["type"] == PG_BRAND_FAST:
+        result = await fetch_fast_brand_detail_view(
+            parsed["days"], parsed["brand_index"], parsed["page"]
+        )
+        if result is None:
+            await callback.answer("Бренд не найден", show_alert=True)
+            return
+        text, keyboard = result
     elif parsed["type"] == PG_BRAND_STATS:
         async with async_session() as session:
             candidates = await report_service.distinct_brands(session)
@@ -329,12 +362,36 @@ async def cb_pagination(callback: CallbackQuery) -> None:
     await show_page(callback.message, text, keyboard, edit=True)
 
 
-@router.callback_query(F.data == MENU_FAST)
+@router.callback_query((F.data == MENU_FAST) | F.data.startswith(f"{MENU_FAST}:"))
 async def cb_menu_fast(callback: CallbackQuery) -> None:
     await callback.answer()
-    if callback.message:
-        text = await fetch_fast_text(DEFAULT_DAYS)
-        await callback.message.edit_text(text, reply_markup=back_keyboard())
+    if callback.message and callback.data:
+        await show_loading(callback)
+        days = parse_menu_days(callback.data)
+        text, keyboard = await fetch_fast_view(days)
+        await show_page(callback.message, text, keyboard, edit=True)
+
+
+@router.callback_query(F.data.startswith("fast_brand:"))
+async def cb_fast_brand(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message or not callback.data:
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+        return
+
+    await show_loading(callback)
+    days = int(parts[1])
+    brand_index = int(parts[2])
+    result = await fetch_fast_brand_detail_view(days, brand_index)
+    if result is None:
+        await callback.answer("Бренд не найден", show_alert=True)
+        return
+
+    text, keyboard = result
+    await show_page(callback.message, text, keyboard, edit=True)
 
 
 @router.callback_query(F.data == MENU_PRICE)
@@ -401,8 +458,9 @@ async def cmd_top(message: Message, command: CommandObject) -> None:
 
 @router.message(Command("fast"))
 async def cmd_fast(message: Message, command: CommandObject) -> None:
-    text = await fetch_fast_text(parse_days(command))
-    await message.answer(text, reply_markup=back_keyboard())
+    days = parse_days(command)
+    text, keyboard = await fetch_fast_view(days)
+    await message.answer(text, reply_markup=keyboard)
 
 
 @router.message(Command("price"))

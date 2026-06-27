@@ -8,6 +8,7 @@ PG_SOLD = "s"
 PG_DELISTED = "d"
 PG_NEW = "n"
 PG_BRAND_TOP = "bt"
+PG_BRAND_FAST = "bf"
 PG_BRAND_STATS = "st"
 
 CALLBACK_LIMIT = 64
@@ -63,6 +64,10 @@ def pg_brand_top(days: int, brand_index: int, page: int) -> str:
     return f"pg:{PG_BRAND_TOP}:{days}:{brand_index}:{page}"
 
 
+def pg_brand_fast(days: int, brand_index: int, page: int) -> str:
+    return f"pg:{PG_BRAND_FAST}:{days}:{brand_index}:{page}"
+
+
 def pg_brand_stats(days: int, page: int, brand: str) -> str:
     return f"pg:{PG_BRAND_STATS}:{days}:{page}:{brand_callback_token(brand, days, page)}"
 
@@ -85,6 +90,13 @@ def parse_pg_callback(data: str) -> dict | None:
     if kind == PG_BRAND_TOP and len(parts) == 5:
         return {
             "type": PG_BRAND_TOP,
+            "days": int(parts[2]),
+            "brand_index": int(parts[3]),
+            "page": int(parts[4]),
+        }
+    if kind == PG_BRAND_FAST and len(parts) == 5:
+        return {
+            "type": PG_BRAND_FAST,
             "days": int(parts[2]),
             "brand_index": int(parts[3]),
             "page": int(parts[4]),
